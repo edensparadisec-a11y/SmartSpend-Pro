@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="es" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>SmartSpend Pro</title>
+
+  <!-- Export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+  <!-- OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <style>
+    :root {
+      --bg:#020617; --card:rgba(15,23,42,.8); --border:rgba(255,255,255,.08);
+      --ok:#10b981; --txt:#f8fafc; --muted:#94a3b8; --warn:#fbbf24; --danger:#ef4444;
+      --glass: blur(12px);
+    }
+    * { box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
+    body{
+      margin:0; background:var(--bg); color:var(--txt);
+      font-family: system-ui, -apple-system, "Inter", sans-serif;
+      padding:16px; padding-bottom:60px;
+      background-image: radial-gradient(circle at top right, #0f172a, #020617);
+      background-attachment: fixed;
+    }
+    .card{
+      background:var(--card); backdrop-filter:var(--glass);
+      border:1px solid var(--border); border-radius:24px;
+      padding:20px; margin-bottom:16px; box-shadow:0 10px 30px rgba(0,0,0,.5);
+    }
+    .overlay{
+      position:fixed; inset:0; background:var(--bg);
+      z-index:10000; display:flex; align-items:center; justify-content:center; padding:20px;
+    }
+    input, select{
+      width:100%; background:rgba(0,0,0,.3);
+      border:1px solid var(--border); color:var(--txt);
+      padding:14px; border-radius:14px; margin-top:10px;
+      font-size:16px; text-align:center; outline:none;
+    }
+    .btn{
+      width:100%; padding:16px; border-radius:16px; border:none;
+      font-weight:900; cursor:pointer; text-transform:uppercase;
+      margin-top:15px; transition:.25s;
+    }
+    .btn-primary{ background:var(--ok); color:#020617; }
+    .btn-secondary{ background:transparent; border:1px solid var(--border); color:var(--txt); }
+    .btn-danger{ background:var(--danger); color:#fff; }
+    #mainApp{ display:none; max-width:520px; margin:0 auto; }
+
+    .eye-btn{
+      width:85px; height:85px; border-radius:50%;
+      background:linear-gradient(135deg,#10b981 0%, #059669 100%);
+      color:#020617; font-size:32px; border:none; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      margin:18px auto 10px; box-shadow:0 0 30px rgba(16,185,129,.4);
+    }
+    .loader{
+      display:none; width:25px; height:25px;
+      border:3px solid rgba(255,255,255,.1); border-top:3px solid var(--ok);
+      border-radius:50%; animation:spin 1s linear infinite; margin:15px auto;
+    }
+    @keyframes spin{ to{ transform:rotate(360deg); } }
+
+    .li{ display:flex; justify-content:space-between; gap:14px; padding:12px 0; border-bottom:1px solid var(--border); }
+    .li:last-child{ border-bottom:none; }
+    .pill{ font-size:10px; border:1px solid var(--border); padding:4px 8px; border-radius:999px; color:var(--muted); }
+    .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .small{ font-size:12px; color:var(--muted); }
+    .muted{ color:var(--muted); }
+    .ok{ color:var(--ok); }
+    .warn{ color:var(--warn); }
+
+    .topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+    .title{ font-size:12px; font-weight:900; letter-spacing:2px; }
+
+    /* Modal */
+    #modal{
+      display:none; position:fixed; inset:0; z-index:20000;
+      background:rgba(0,0,0,.55); padding:18px;
+    }
+    #modal .card{ max-width:520px; margin:40px auto; }
+    .row{ display:flex; gap:10px; }
+    .row > * { flex:1; text-align:left; }
+    label{ display:block; font-size:11px; color:var(--muted); margin-top:10px; text-align:left; }
+  </style>
+</head>
+<body>
+
+  <!-- ACTIVATION -->
+  <div id="activationScreen" class="overlay">
+    <div class="card" style="width:100%; max-width:420px; text-align:center;">
+      <h2 style="color:var(--ok); margin:0;">SmartSpend Pro</h2>
+      <p class="small" style="margin: 10px 0 18px 0;">Auditoría de Gastos Inteligente · Escaneo real + Reportes</p>
+
+      <input id="clientName" type="text" placeholder="Nombre del Propietario">
+      <input id="authCode" type="text" placeholder="Código de Activación" maxlength="30">
+
+      <button id="btnActivar" onclick="activarLicencia()" class="btn btn-primary">Activar Licencia</button>
+      <div id="loading" class="loader"></div>
+      <p id="status" class="small" style="margin-top:16px;">Servidor listo</p>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div id="mainApp">
+    <div class="topbar">
+      <span id="pillPlan" class="pill">PRO</span>
+      <span class="title">SMARTSPEND</span>
+      <span id="pillSync" class="pill">ONLINE</span>
+    </div>
+
+    <div class="card">
+      <div class="grid2">
+        <div>
+          <div class="small">Total semana</div>
+          <div id="kpiWeek" style="font-size:20px; font-weight:900;">—</div>
+        </div>
+        <div>
+          <div class="small">Gastos hormiga (≤ 30)</div>
+          <div id="kpiAnt" style="font-size:20px; font-weight:900;">—</div>
+        </div>
+      </div>
+      <div class="small" style="margin-top:10px;">
+        <span class="muted">Top categoría:</span> <span id="kpiTopCat" class="ok">—</span>
+      </div>
+    </div>
+
+    <button class="eye-btn" onclick="document.getElementById('fileInput').click()">👁️</button>
+    <div class="small" style="text-align:center; margin-bottom:12px;">Escanea un recibo (cámara o galería)</div>
+    <input type="file" id="fileInput" accept="image/*" capture style="display:none" onchange="scanReceipt(this.files[0])">
+
+    <div class="card">
+      <h4 style="margin:0 0 12px 0; font-size:14px;">Movimientos Recientes</h4>
+      <div id="history">
+        <p class="small" style="text-align:center;">Aún no hay movimientos. Pulsa el ojo para escanear un recibo.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 style="margin:0 0 12px 0; font-size:14px;">Acciones</h4>
+      <button class="btn btn-secondary" onclick="exportExcel()">Exportar Excel</button>
+      <button class="btn btn-secondary" onclick="exportPDF()">Exportar PDF</button>
+      <button class="btn btn-secondary" onclick="syncPending()">Sincronizar (offline → online)</button>
+      <button class="btn btn-danger" onclick="logout()">Desactivar Licencia</button>
+
+      <div class="small" style="margin-top:10px;">
+        <span class="muted">UserId:</span> <span id="whoUser"></span><br>
+        <span class="muted">Cliente:</span> <span id="whoClient"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL -->
+  <div id="modal">
+    <div class="card">
+      <h3 style="margin:0; color:var(--ok);">Recibo detectado</h3>
+      <p class="small" style="margin:8px 0 0 0;">Confirma o edita antes de guardar.</p>
+
+      <label>Comercio</label>
+      <input id="mMerchant" type="text" placeholder="Ej: Supermercado X">
+
+      <div class="row">
+        <div>
+          <label>Fecha</label>
+          <input id="mDate" type="text" placeholder="YYYY-MM-DD">
+        </div>
+        <div>
+          <label>Categoría</label>
+          <select id="mCategory">
+            <option>Supermercado</option>
+            <option>Restaurante</option>
+            <option>Café</option>
+            <option>Transporte</option>
+            <option>Salud</option>
+            <option>Servicios</option>
+            <option>Compras</option>
+            <option>Entretenimiento</option>
+            <option>Educación</option>
+            <option>Otros</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Monto</label>
+          <input id="mAmount" type="text" placeholder="Ej: 45.90">
+        </div>
+        <div>
+          <label>Moneda</label>
+          <select id="mCurrency">
+            <option value="₪">₪</option>
+            <option value="$">$</option>
+            <option value="€">€</option>
+            <option value="£">£</option>
+          </select>
+        </div>
+      </div>
+
+      <label>Texto OCR (resumen)</label>
+      <input id="mRaw" type="text" placeholder="(texto resumido)" />
+
+      <div class="grid2" style="margin-top:14px;">
+        <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="confirmSave()">Guardar</button>
+      </div>
+
+      <div id="modalSpin" class="loader"></div>
+      <p id="modalMsg" class="small" style="margin-top:10px;"></p>
+    </div>
+  </div>
+
+  <script>
+    /***************
+     * CONFIG (CAMBIA SOLO ESTO)
+     ***************/
+    const APP_URL ="https://script.google.com/macros/s/AKfycbyrTPGxvrCX9gzYL3Uqh5VtAWeP9886jlywGLFk0y2us4ZeNQZWMY7u1JYWKU827lMB/exec";
+
+    const KEYS = {
+      token: "smartspend_token_v2",
+      tokenExp: "smartspend_tokenexp_v2",
+      userId: "smartspend_userid_v2",
+      deviceId: "smartspend_deviceid_v2",
+      clientName: "smartspend_clientname_v2",
+      pending: "smartspend_pending_v2"
+    };
+
+    let cache = {
+      expenses: [],
+      lastOCR: { rawText:"", imageName:"" }
+    };
+
+    window.onload = async () => {
+      ensureIds();
+      setOnlinePill();
+      window.addEventListener("online", () => { setOnlinePill(); syncPending(); });
+      window.addEventListener("offline", setOnlinePill);
+
+      const token = localStorage.getItem(KEYS.token);
+      if (token) {
+        showApp();
+        await loadExpenses();
+        renderAll();
+        syncPending();
+      }
+    };
+
+    function ensureIds() {
+      if (!localStorage.getItem(KEYS.userId)) localStorage.setItem(KEYS.userId, uuid());
+      if (!localStorage.getItem(KEYS.deviceId)) localStorage.setItem(KEYS.deviceId, uuid());
+    }
+
+    function setOnlinePill() {
+      const el = document.getElementById("pillSync");
+      if (!el) return;
+      if (navigator.onLine) { el.textContent = "ONLINE"; el.style.color="var(--ok)"; }
+      else { el.textContent = "OFFLINE"; el.style.color="var(--warn)"; }
+    }
+
+    /***************
+     * ACTIVATION
+     ***************/
+    async function activarLicencia() {
+      const code = document.getElementById("authCode").value.trim();
+      const clientName = document.getElementById("clientName").value.trim();
+      const btn = document.getElementById("btnActivar");
+      const loader = document.getElementById("loading");
+      const status = document.getElementById("status");
+
+      if (!code) return alert("Ingresa tu código");
+
+      btn.style.display = "none";
+      loader.style.display = "block";
+      status.textContent = "Validando licencia…";
+
+      const userId = localStorage.getItem(KEYS.userId);
+      const deviceId = localStorage.getItem(KEYS.deviceId);
+
+      try {
+        const url = `${APP_URL}?action=activate&id=${encodeURIComponent(code)}&name=${encodeURIComponent(clientName)}&userId=${encodeURIComponent(userId)}&device=${encodeURIComponent(deviceId)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data && data.ok && data.status === "VALIDO" && data.token) {
+          localStorage.setItem(KEYS.token, data.token);
+          localStorage.setItem(KEYS.tokenExp, data.tokenExp || "");
+          localStorage.setItem(KEYS.clientName, data.clientName || clientName || "");
+
+          showApp();
+          await loadExpenses();
+          renderAll();
+          syncPending();
+
+          status.textContent = "Activación exitosa.";
+        } else {
+          alert((data && data.error) ? data.error : "Licencia inválida.");
+          btn.style.display = "block";
+          loader.style.display = "none";
+          status.textContent = "Verificación fallida.";
+        }
+      } catch (e) {
+        alert("Error de conexión. Revisa tu internet.");
+        btn.style.display = "block";
+        loader.style.display = "none";
+        status.textContent = "Sin conexión.";
+      }
+    }
+
+    function showApp() {
+      document.getElementById("activationScreen").style.display = "none";
+      document.getElementById("mainApp").style.display = "block";
+      document.getElementById("whoUser").textContent = localStorage.getItem(KEYS.userId);
+      document.getElementById("whoClient").textContent = localStorage.getItem(KEYS.clientName) || "—";
+    }
+
+    function logout() {
+      if (!confirm("¿Quieres desactivar la licencia?")) return;
+      localStorage.removeItem(KEYS.token);
+      localStorage.removeItem(KEYS.tokenExp);
+      // pending se mantiene para no perder datos
+      location.reload();
+    }
+
+    /***************
+     * OCR
+     ***************/
+    async function scanReceipt(file) {
+      if (!file) return;
+
+      const hist = document.getElementById("history");
+      hist.innerHTML = `<p class="small" style="text-align:center;">Procesando OCR…</p>`;
+
+      const imageName = file.name || ("receipt_" + Date.now() + ".jpg");
+      cache.lastOCR.imageName = imageName;
+
+      try {
+        const raw = await runOCR(file);
+        cache.lastOCR.rawText = raw;
+
+        const parsed = parseReceipt(raw);
+        openModal({
+          merchant: parsed.merchant || "",
+          date: parsed.date || todayISO(),
+          category: guessCategory(parsed.merchant, raw),
+          amount: parsed.amount || "",
+          currency: parsed.currency || "₪",
+          rawText: (raw.length > 120 ? raw.slice(0, 120) + "…" : raw)
+        });
+      } catch (e) {
+        alert("No se pudo leer el recibo. Intenta con mejor luz o más cerca.");
+        await loadExpenses();
+        renderAll();
+      }
+    }
+
+    async function runOCR(file) {
+      const worker = await Tesseract.createWorker("eng+spa");
+      await worker.setParameters({ tessedit_pageseg_mode: "6" });
+
+      const imageUrl = URL.createObjectURL(file);
+      const result = await worker.recognize(imageUrl);
+      URL.revokeObjectURL(imageUrl);
+      await worker.terminate();
+
+      return (result && result.data && result.data.text) ? String(result.data.text).trim() : "";
+    }
+
+    function parseReceipt(rawText) {
+      const t = (rawText || "").replace(/\r/g, "\n");
+      const lines = t.split("\n").map(s => s.trim()).filter(Boolean);
+
+      let merchant = "";
+      for (const ln of lines.slice(0, 8)) {
+        if (ln.length >= 3 && !/^\d+([.,]\d+)?$/.test(ln)) { merchant = ln; break; }
+      }
+
+      let currency = "₪";
+      if (/[€]/.test(t)) currency = "€";
+      else if (/USD|\$/.test(t)) currency = "$";
+      else if (/GBP|£/.test(t)) currency = "£";
+      else if (/₪|NIS|ILS/.test(t)) currency = "₪";
+
+      const date = guessDate(t);
+      const amount = guessTotalAmount(t);
+
+      return { merchant, currency, date, amount };
+    }
+
+    function guessDate(text) {
+      let m = text.match(/\b(20\d{2})[-\/\.](0[1-9]|1[0-2])[-\/\.]([0-2]\d|3[01])\b/);
+      if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+
+      m = text.match(/\b([0-2]\d|3[01])[-\/\.](0[1-9]|1[0-2])[-\/\.](20\d{2})\b/);
+      if (m) return `${m[3]}-${m[2]}-${String(m[1]).padStart(2,"0")}`;
+
+      return todayISO();
+    }
+
+    function guessTotalAmount(text) {
+      const keys = [
+        "TOTAL","TOTAL DUE","GRAND TOTAL","AMOUNT","TO PAY","PAY",
+        "IMPORTE","PAGAR","SUMA",
+        "לתשלום","סה\"כ","סה״כ","סהכ","סכום"
+      ];
+
+      const cleaned = String(text || "").replace(/,/g, ".");
+      const lines = cleaned.split("\n");
+
+      let best = null;
+
+      for (const ln of lines) {
+        const up = ln.toUpperCase();
+        const hit = keys.some(k => up.includes(k.toUpperCase()));
+        if (!hit) continue;
+        const candidates = ln.match(/\b\d{1,6}(\.\d{1,2})\b/g) || [];
+        for (const c of candidates) {
+          const v = Number(c);
+          if (!isNaN(v) && v > 0) best = best === null ? v : Math.max(best, v);
+        }
+      }
+
+      if (best === null) {
+        const all = cleaned.match(/\b\d{1,6}(\.\d{1,2})\b/g) || [];
+        let mx = 0;
+        for (const a of all) {
+          const v = Number(a);
+          if (!isNaN(v) && v > mx) mx = v;
+        }
+        best = mx || null;
+      }
+
+      return best === null ? "" : best.toFixed(2);
+    }
+
+    function guessCategory(merchant, rawText) {
+      const s = (merchant + " " + rawText).toLowerCase();
+      if (/(cafe|coffee|espresso|starbucks)/.test(s)) return "Café";
+      if (/(restaurant|pizza|burger|shawarma|falafel|grill)/.test(s)) return "Restaurante";
+      if (/(pharmacy|drug|farm|בית מרקחת)/.test(s)) return "Salud";
+      if (/(bus|train|taxi|uber|transport|rav-kav|רב-קו)/.test(s)) return "Transporte";
+      if (/(super|market|grocery|שופרסל|רמי לוי|ויקטורי)/.test(s)) return "Supermercado";
+      if (/(netflix|spotify|cinema|movie|game)/.test(s)) return "Entretenimiento";
+      if (/(electric|water|internet|phone|bill|utility)/.test(s)) return "Servicios";
+      return "Otros";
+    }
+
+    /***************
+     * MODAL / SAVE
+     ***************/
+    function openModal(data) {
+      document.getElementById("mMerchant").value = data.merchant || "";
+      document.getElementById("mDate").value = data.date || todayISO();
+      document.getElementById("mCategory").value = data.category || "Otros";
+      document.getElementById("mAmount").value = data.amount || "";
+      document.getElementById("mCurrency").value = data.currency || "₪";
+      document.getElementById("mRaw").value = data.rawText || "";
+      document.getElementById("modalMsg").textContent = "";
+      document.getElementById("modalSpin").style.display = "none";
+      document.getElementById("modal").style.display = "block";
+    }
+
+    function closeModal() {
+      document.getElementById("modal").style.display = "none";
+    }
+
+    async function confirmSave() {
+      const merchant = document.getElementById("mMerchant").value.trim() || "Sin comercio";
+      const date = document.getElementById("mDate").value.trim() || todayISO();
+      const category = document.getElementById("mCategory").value;
+      const currency = document.getElementById("mCurrency").value;
+      const amountStr = document.getElementById("mAmount").value.trim().replace(",", ".");
+      const amount = Number(amountStr);
+
+      if (!amount || isNaN(amount) || amount <= 0) {
+        return alert("Monto inválido. Corrígelo antes de guardar.");
+      }
+
+      const expense = {
+        merchant,
+        date,
+        category,
+        amount: Number(amount.toFixed(2)),
+        currency,
+        rawText: cache.lastOCR.rawText || "",
+        imageName: cache.lastOCR.imageName || ""
+      };
+
+      document.getElementById("modalSpin").style.display = "block";
+      document.getElementById("modalMsg").textContent = "Guardando…";
+
+      const savedOnline = await saveExpense(expense);
+
+      document.getElementById("modalSpin").style.display = "none";
+      document.getElementById("modalMsg").textContent = savedOnline
+        ? "Guardado en servidor."
+        : "Guardado offline (se sincroniza al tener internet).";
+
+      closeModal();
+      await loadExpenses();
+      renderAll();
+    }
+
+    async function saveExpense(expense) {
+      const token = localStorage.getItem(KEYS.token);
+      if (!token) { alert("Sesión inválida. Reactiva la licencia."); return false; }
+
+      if (!navigator.onLine) {
+        queuePending(expense);
+        return false;
+      }
+
+      try {
+        const res = await fetch(APP_URL, {
+          method: "POST",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ action:"save", token, expense })
+        });
+        const data = await res.json();
+        if (data && data.ok) return true;
+
+        queuePending(expense);
+        return false;
+      } catch (e) {
+        queuePending(expense);
+        return false;
+      }
+    }
+
+    function queuePending(expense) {
+      const arr = JSON.parse(localStorage.getItem(KEYS.pending) || "[]");
+      arr.unshift({ ...expense, _queuedAt: new Date().toISOString() });
+      localStorage.setItem(KEYS.pending, JSON.stringify(arr.slice(0, 200)));
+    }
+
+    async function syncPending() {
+      if (!navigator.onLine) return;
+      const token = localStorage.getItem(KEYS.token);
+      if (!token) return;
+
+      const pending = JSON.parse(localStorage.getItem(KEYS.pending) || "[]");
+      if (!pending.length) return;
+
+      const toSend = pending.slice().reverse();
+      const keep = [];
+
+      for (const exp of toSend) {
+        try {
+          const res = await fetch(APP_URL, {
+            method: "POST",
+            headers: { "Content-Type":"application/json" },
+            body: JSON.stringify({ action:"save", token, expense: exp })
+          });
+          const data = await res.json();
+          if (!(data && data.ok)) keep.push(exp);
+        } catch (e) {
+          keep.push(exp);
+        }
+      }
+
+      localStorage.setItem(KEYS.pending, JSON.stringify(keep.slice(-200)));
+      await loadExpenses();
+      renderAll();
+    }
+
+    /***************
+     * LOAD + RENDER
+     ***************/
+    async function loadExpenses() {
+      const token = localStorage.getItem(KEYS.token);
+      if (!token) { cache.expenses = []; return; }
+
+      if (!navigator.onLine && cache.expenses.length) return;
+
+      try {
+        const url = `${APP_URL}?action=list&token=${encodeURIComponent(token)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        cache.expenses = (data && data.ok && Array.isArray(data.items)) ? data.items : [];
+      } catch (e) {
+        // keep cache
+      }
+    }
+
+    function renderAll() {
+      renderHistory();
+      renderKPIs();
+      document.getElementById("whoClient").textContent = localStorage.getItem(KEYS.clientName) || "—";
+      document.getElementById("whoUser").textContent = localStorage.getItem(KEYS.userId) || "—";
+    }
+
+    function renderHistory() {
+      const hist = document.getElementById("history");
+      const items = cache.expenses || [];
+      if (!items.length) {
+        hist.innerHTML = `<p class="small" style="text-align:center;">Aún no hay movimientos. Pulsa el ojo para escanear un recibo.</p>`;
+        return;
+      }
+
+      hist.innerHTML = items.slice(0, 30).map(it => {
+        const m = esc(it.merchant || "—");
+        const d = esc(it.date || "—");
+        const c = esc(it.category || "—");
+        const cur = esc(it.currency || "₪");
+        const amt = Number(it.amount || 0).toFixed(2);
+        return `
+          <div class="li">
+            <div>
+              <div style="font-size:14px; font-weight:900;">${m}</div>
+              <div class="small">${d} · ${c}</div>
+            </div>
+            <div class="ok" style="font-weight:900;">${cur}${amt}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderKPIs() {
+      const items = cache.expenses || [];
+      const now = new Date();
+
+      const last7 = items.filter(it => {
+        const dt = parseISODate(it.date);
+        if (!dt) return false;
+        const diff = (now - dt) / (24*3600*1000);
+        return diff >= 0 && diff <= 7.01;
+      });
+
+      const weekSum = last7.reduce((a,it) => a + Number(it.amount || 0), 0);
+      const antCount = last7.filter(it => Number(it.amount || 0) <= 30).length;
+
+      const freq = {};
+      for (const it of items) {
+        const cat = (it.category || "Otros");
+        freq[cat] = (freq[cat] || 0) + 1;
+      }
+      let top = "—", topN = 0;
+      for (const k in freq) {
+        if (freq[k] > topN) { topN = freq[k]; top = k; }
+      }
+
+      document.getElementById("kpiWeek").textContent = `₪${weekSum.toFixed(2)}`;
+      document.getElementById("kpiAnt").textContent = String(antCount);
+      document.getElementById("kpiTopCat").textContent = top;
+    }
+
+    /***************
+     * EXPORT
+     ***************/
+    function exportExcel() {
+      const items = cache.expenses || [];
+      if (!items.length) return alert("No hay datos para exportar.");
+
+      const rows = items.map(it => ({
+        Fecha: it.date || "",
+        Comercio: it.merchant || "",
+        Categoría: it.category || "",
+        Monto: Number(it.amount || 0),
+        Moneda: it.currency || "₪",
+        Timestamp: it.ts || ""
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Gastos");
+
+      const client = (localStorage.getItem(KEYS.clientName) || "SmartSpend").replace(/\s+/g,"_");
+      XLSX.writeFile(wb, `SmartSpend_${client}.xlsx`);
+    }
+
+    function exportPDF() {
+      const items = cache.expenses || [];
+      if (!items.length) return alert("No hay datos para exportar.");
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit:"pt", format:"a4" });
+
+      const client = localStorage.getItem(KEYS.clientName) || "Cliente";
+      doc.setFontSize(16);
+      doc.text("SmartSpend Pro - Reporte de Gastos", 40, 50);
+      doc.setFontSize(10);
+      doc.text(`Cliente: ${client}`, 40, 70);
+      doc.text(`Generado: ${new Date().toISOString()}`, 40, 85);
+
+      let y = 115;
+      doc.setFontSize(11);
+      doc.text("Fecha", 40, y);
+      doc.text("Comercio", 120, y);
+      doc.text("Categoría", 320, y);
+      doc.text("Monto", 430, y);
+      y += 10;
+      doc.setLineWidth(0.5);
+      doc.line(40, y, 555, y);
+      y += 16;
+
+      const max = Math.min(items.length, 60);
+      for (let i=0; i<max; i++) {
+        const it = items[i];
+        const date = String(it.date || "").slice(0, 10);
+        const mer = String(it.merchant || "").slice(0, 26);
+        const cat = String(it.category || "").slice(0, 16);
+        const amt = `${it.currency || "₪"}${Number(it.amount || 0).toFixed(2)}`;
+
+        doc.setFontSize(10);
+        doc.text(date, 40, y);
+        doc.text(mer, 120, y);
+        doc.text(cat, 320, y);
+        doc.text(amt, 430, y);
+
+        y += 16;
+        if (y > 780) { doc.addPage(); y = 60; }
+      }
+
+      const safe = client.replace(/\s+/g,"_");
+      doc.save(`SmartSpend_${safe}.pdf`);
+    }
+
+    /***************
+     * UTILS
+     ***************/
+    function uuid() {
+      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+        const r = Math.random()*16|0, v = c==="x" ? r : (r&0x3|0x8);
+        return v.toString(16);
+      });
+    }
+    function todayISO(){
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,"0");
+      const day = String(d.getDate()).padStart(2,"0");
+      return `${y}-${m}-${day}`;
+    }
+    function parseISODate(s){
+      if(!s) return null;
+      const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if(!m) return null;
+      const d = new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+      return isNaN(d.getTime()) ? null : d;
+    }
+    function esc(s){
+      return String(s||"").replace(/[&<>"']/g, ch => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+      }[ch]));
+    }
+  </script>
+</body>
+</html>
